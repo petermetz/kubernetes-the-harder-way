@@ -1,3 +1,6 @@
+# Developers can store local stuff in dirs named __something
+__*
+
 gateway*/
 control*/
 worker*/
