@@ -12,6 +12,8 @@ if [[ "$EUID" -ne 0 ]]; then
   exit 1
 fi
 
+UPSTREAM_DNS_SERVERS=$(get_upstream_dns)
+
 # Manually set up bridge interface with NAT on Linux
 
 if [[ $(uname -s) == Linux ]]; then
@@ -105,6 +107,12 @@ dhcp-authoritative
 domain=kubenet
 expand-hosts
 EOF
+
+# Append the discovered upstream DNS servers to dnsmasq.conf
+for server in $UPSTREAM_DNS_SERVERS; do
+    echo "Adding upstream DNS server: $server to /etc/dnsmasq.conf"
+    echo "server=$server" | sudo tee -a /etc/dnsmasq.conf
+done
 
 if [[ "$os" == Linux ]]; then
 cat <<EOF | tee -a "$dnsmasq_config"
