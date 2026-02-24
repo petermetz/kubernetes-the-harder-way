@@ -5,6 +5,7 @@
 set -xe
 dir=$(dirname "$0")
 source "$dir/variables.sh"
+source "$dir/helpers.sh"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "this script must be run as root" >&2
@@ -17,9 +18,11 @@ vmname=$(hostname -s)
 # etcd
 
 etcd_archive=etcd-v${etcd_version}-linux-${arch}.tar.gz
-# Use --content-disposition for better error tracking
-wget --show-progress --https-only --timestamping \
-  "https://github.com/etcd-io/etcd/releases/download/v${etcd_version}/$etcd_archive"
+echo "==> Downloading etcd v${etcd_version}..."
+wget_retry "https://github.com/etcd-io/etcd/releases/download/v${etcd_version}/$etcd_archive" || {
+  echo "ERROR: Failed to download etcd. Aborting." >&2
+  exit 1
+}
 
 tar -xvf $etcd_archive
 
@@ -71,16 +74,12 @@ systemctl start etcd
 
 mkdir -p /etc/kubernetes/config
 
-# REFACTORED WGET: 
-# 1. Removed -q so errors print to stderr.
-# 2. Used dl.k8s.io (the current official domain).
-# 3. Wrapped in a check to ensure the script stops with a message if download fails.
-echo "Downloading Kubernetes binaries..."
-wget --show-progress --https-only --timestamping \
-  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-apiserver \
-  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-controller-manager \
-  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-scheduler || {
-    echo "ERROR: Download failed. Check if the version v${k8s_version} or the URL is correct." >&2
+echo "==> Downloading Kubernetes control plane binaries v${k8s_version}..."
+wget_retry \
+  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-apiserver" \
+  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-controller-manager" \
+  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-scheduler" || {
+    echo "ERROR: Failed to download Kubernetes control plane binaries after retries. Aborting." >&2
     exit 1
   }
 

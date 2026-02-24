@@ -6,6 +6,7 @@
 set -xe
 dir=$(dirname "$0")
 source "$dir/variables.sh"
+source "$dir/helpers.sh"
 sudo -v
 
 export USE_CILIUM
@@ -42,8 +43,11 @@ remote_size=$(curl -sI "$ubuntu_img_url" | grep -i Content-Length | awk '{print 
 if [ -f "$dest" ] && [ "$(stat -c%s "$dest")" -eq "$remote_size" ]; then
     echo "File already exists and size matches ($remote_size bytes). Skipping download."
 else
-    echo "File missing or size mismatch. Downloading..."
-    wget -q --show-progress --https-only -O "$dest" "$ubuntu_img_url"
+    echo "==> File missing or size mismatch. Downloading Ubuntu cloud image..."
+    wget_retry -O "$dest" "$ubuntu_img_url" || {
+      echo "ERROR: Failed to download Ubuntu cloud image. Aborting." >&2
+      exit 1
+    }
 fi
 
 "$dir/vmsetupall.sh"

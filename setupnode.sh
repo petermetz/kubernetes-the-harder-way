@@ -5,6 +5,7 @@
 set -xe
 dir=$(dirname "$0")
 source "$dir/variables.sh"
+source "$dir/helpers.sh"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "this script must be run as root" >&2
@@ -29,11 +30,15 @@ crictl_archive=crictl-v${cri_version}-linux-${arch}.tar.gz
 containerd_archive=containerd-${containerd_version}-linux-${arch}.tar.gz
 cni_plugins_archive=cni-plugins-linux-${arch}-v${cni_plugins_version}.tgz
 
-wget -q --show-progress --https-only --timestamping \
-  https://github.com/kubernetes-sigs/cri-tools/releases/download/v${cri_version}/${crictl_archive} \
-  https://github.com/opencontainers/runc/releases/download/v${runc_version}/runc.${arch} \
-  https://github.com/containerd/containerd/releases/download/v${containerd_version}/${containerd_archive} \
-  https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kubelet
+echo "==> Downloading container runtime and kubelet..."
+wget_retry \
+  "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${cri_version}/${crictl_archive}" \
+  "https://github.com/opencontainers/runc/releases/download/v${runc_version}/runc.${arch}" \
+  "https://github.com/containerd/containerd/releases/download/v${containerd_version}/${containerd_archive}" \
+  "https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kubelet" || {
+    echo "ERROR: Failed to download container runtime/kubelet after retries. Aborting." >&2
+    exit 1
+  }
 
 mkdir -p \
   /opt/cni/bin \
@@ -51,9 +56,13 @@ cp runc crictl kubelet /usr/local/bin/
 cp containerd/bin/* /bin/
 
 if [[ -z $USE_CILIUM ]]; then
-  wget -q --show-progress --https-only --timestamping \
-    https://github.com/containernetworking/plugins/releases/download/v${cni_plugins_version}/${cni_plugins_archive} \
-    https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-proxy
+  echo "==> Downloading CNI plugins and kube-proxy..."
+  wget_retry \
+    "https://github.com/containernetworking/plugins/releases/download/v${cni_plugins_version}/${cni_plugins_archive}" \
+    "https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-proxy" || {
+      echo "ERROR: Failed to download CNI/kube-proxy after retries. Aborting." >&2
+      exit 1
+    }
 
   mkdir -p /var/lib/kube-proxy
   chmod +x kube-proxy
