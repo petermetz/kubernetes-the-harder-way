@@ -30,8 +30,19 @@ cd "$dir/auth"
 ./setuplocalkubeconfig.sh
 cd ..
 
-wget -P "$dir" -q --show-progress --https-only --timestamping -O ubuntu-cloud.img \
-  https://cloud-images.ubuntu.com/plucky/current/plucky-server-cloudimg-${arch}.img
+ubuntu_img_url="https://cloud-images.ubuntu.com/plucky/current/plucky-server-cloudimg-${arch}.img"
+dest="$dir/ubuntu-cloud.img"
+
+# 1. Get the remote file size in bytes
+remote_size=$(curl -sI "$ubuntu_img_url" | grep -i Content-Length | awk '{print $2}' | tr -d '\r')
+
+# 2. Check if local file exists and matches the size
+if [ -f "$dest" ] && [ "$(stat -c%s "$dest")" -eq "$remote_size" ]; then
+    echo "File already exists and size matches ($remote_size bytes). Skipping download."
+else
+    echo "File missing or size mismatch. Downloading..."
+    wget -q --show-progress --https-only -O "$dest" "$ubuntu_img_url"
+fi
 
 "$dir/vmsetupall.sh"
 sudo -E "$dir/setuphost.sh"

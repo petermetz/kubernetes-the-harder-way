@@ -5,6 +5,9 @@ dir=$(dirname "$0")
 
 source "$dir/variables.sh"
 
+# Networking safety: Timeout after 30s if the connection drops
+SCP_OPTS="-o ConnectTimeout=30 -o BatchMode=yes"
+
 etcd_archive=etcd-v${etcd_version}-linux-${arch}.tar.gz
 crictl_archive=crictl-v${cri_version}-linux-${arch}.tar.gz
 containerd_archive=containerd-${containerd_version}-linux-${arch}.tar.gz
@@ -37,7 +40,11 @@ if [[ -z $USE_CILIUM ]]; then
 fi
 
 for i in $(seq 0 2); do
-  scp \
+  echo "Deploying to control$i..."
+  
+  # Added a simple retry loop for network stability
+  retry_count=0
+  until scp $SCP_OPTS \
     "$dir/bin/$etcd_archive" \
     "$dir/bin/kube-apiserver" \
     "$dir/bin/kube-controller-manager" \
@@ -46,28 +53,59 @@ for i in $(seq 0 2); do
     "$dir/bin/runc.$arch" \
     "$dir/bin/$containerd_archive" \
     "$dir/bin/kubelet" \
-    ubuntu@control$i:
+    ubuntu@control$i:; do
+      
+      retry_count=$((retry_count + 1))
+      if [ $retry_count -ge 3 ]; then
+        echo "ERROR: Failed to scp to control$i after 3 attempts." >&2
+        exit 1
+      fi
+      echo "SCP failed on control$i, retrying in 5 seconds..."
+      sleep 5
+  done
 
   if [[ -z $USE_CILIUM ]]; then
-    scp \
-      "$dir/bin/$cni_plugins_archive" \
-      "$dir/bin/kube-proxy" \
-      ubuntu@control$i:
+    scp $SCP_OPTS "$dir/bin/$cni_plugins_archive" "$dir/bin/kube-proxy" ubuntu@control$i:
   fi
 done
 
 for i in $(seq 0 2); do
-  scp \
+  echo "Deploying to worker$i..."
+  
+  # Retry loop for core worker binaries
+  retry_count=0
+  until scp $SCP_OPTS \
     "$dir/bin/$crictl_archive" \
     "$dir/bin/runc.$arch" \
     "$dir/bin/$containerd_archive" \
     "$dir/bin/kubelet" \
-    ubuntu@worker$i:
+    ubuntu@worker$i:; do
+      
+      retry_count=$((retry_count + 1))
+      if [ $retry_count -ge 3 ]; then
+        echo "ERROR: Failed to scp to worker$i after 3 attempts." >&2
+        exit 1
+      fi
+      echo "SCP failed on worker$i, retrying in 5 seconds (Attempt $retry_count/3)..."
+      sleep 5
+  done
 
+  # Conditional CNI/Proxy deployment with its own retry logic
   if [[ -z $USE_CILIUM ]]; then
-    scp \
+    echo "Deploying CNI and Proxy to worker$i..."
+    retry_cni=0
+    until scp $SCP_OPTS \
       "$dir/bin/$cni_plugins_archive" \
       "$dir/bin/kube-proxy" \
-      ubuntu@worker$i:
+      ubuntu@worker$i:; do
+        
+        retry_cni=$((retry_cni + 1))
+        if [ $retry_cni -ge 3 ]; then
+          echo "ERROR: Failed to scp CNI/Proxy to worker$i after 3 attempts." >&2
+          exit 1
+        fi
+        echo "SCP (CNI) failed on worker$i, retrying in 5 seconds..."
+        sleep 5
+    done
   fi
 done
