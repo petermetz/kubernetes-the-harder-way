@@ -17,11 +17,16 @@ vmname=$(hostname -s)
 # etcd
 
 etcd_archive=etcd-v${etcd_version}-linux-${arch}.tar.gz
-wget -q --show-progress --https-only --timestamping \
-  https://github.com/etcd-io/etcd/releases/download/v${etcd_version}/$etcd_archive
+# Use --content-disposition for better error tracking
+wget --show-progress --https-only --timestamping \
+  "https://github.com/etcd-io/etcd/releases/download/v${etcd_version}/$etcd_archive"
 
 tar -xvf $etcd_archive
-cp etcd-v${etcd_version}-linux-${arch}/etcd* /usr/local/bin
+
+# PREVENT "Text file busy": Remove existing binaries before copying for reentrancy
+rm -f /usr/local/bin/etcd /usr/local/bin/etcdctl /usr/local/bin/etcdutl
+cp etcd-v${etcd_version}-linux-${arch}/etcd* /usr/local/bin/
+
 mkdir -p /etc/etcd /var/lib/etcd
 chmod 700 /var/lib/etcd/
 cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
@@ -62,16 +67,27 @@ systemctl daemon-reload
 systemctl enable etcd
 systemctl start etcd
 
-# kubernetes control plane setup
+# --- Kubernetes Control Plane Section ---
 
 mkdir -p /etc/kubernetes/config
 
-wget -q --show-progress --https-only --timestamping \
-  https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-apiserver \
-  https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-controller-manager \
-  https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-scheduler \
+# REFACTORED WGET: 
+# 1. Removed -q so errors print to stderr.
+# 2. Used dl.k8s.io (the current official domain).
+# 3. Wrapped in a check to ensure the script stops with a message if download fails.
+echo "Downloading Kubernetes binaries..."
+wget --show-progress --https-only --timestamping \
+  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-apiserver \
+  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-controller-manager \
+  https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-scheduler || {
+    echo "ERROR: Download failed. Check if the version v${k8s_version} or the URL is correct." >&2
+    exit 1
+  }
 
 chmod +x kube-apiserver kube-controller-manager kube-scheduler
+
+# PREVENT "Text file busy": Unlink old binaries
+rm -f /usr/local/bin/kube-apiserver /usr/local/bin/kube-controller-manager /usr/local/bin/kube-scheduler
 cp kube-apiserver kube-controller-manager kube-scheduler /usr/local/bin/
 
 mkdir -p /var/lib/kubernetes/
