@@ -86,6 +86,8 @@ if [[ -z $USE_CILIUM ]]; then
   sudo "$dir/setuproutes.sh"
 fi
 
+"$dir/waitforcluster.sh"
+
 "$dir/setupkubeletaccess.sh"
 "$dir/addhelmrepos.sh"
 "$dir/setupcluster.sh"
