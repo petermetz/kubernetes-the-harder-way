@@ -35,7 +35,7 @@ wget_retry \
   "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${cri_version}/${crictl_archive}" \
   "https://github.com/opencontainers/runc/releases/download/v${runc_version}/runc.${arch}" \
   "https://github.com/containerd/containerd/releases/download/v${containerd_version}/${containerd_archive}" \
-  "https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kubelet" || {
+  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kubelet" || {
     echo "ERROR: Failed to download container runtime/kubelet after retries. Aborting." >&2
     exit 1
   }
@@ -59,7 +59,7 @@ if [[ -z $USE_CILIUM ]]; then
   echo "==> Downloading CNI plugins and kube-proxy..."
   wget_retry \
     "https://github.com/containernetworking/plugins/releases/download/v${cni_plugins_version}/${cni_plugins_archive}" \
-    "https://cdn.dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-proxy" || {
+    "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-proxy" || {
       echo "ERROR: Failed to download CNI/kube-proxy after retries. Aborting." >&2
       exit 1
     }
