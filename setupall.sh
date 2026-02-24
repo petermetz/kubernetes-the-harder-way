@@ -24,6 +24,8 @@ case $(uname -s) in
     ;;
 esac
 
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+
 cd "$dir/auth"
 ./genauth.sh
 ./genenckey.sh
