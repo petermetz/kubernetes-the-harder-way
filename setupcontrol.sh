@@ -18,13 +18,18 @@ vmname=$(hostname -s)
 # etcd
 
 etcd_archive=etcd-v${etcd_version}-linux-${arch}.tar.gz
-echo "==> Downloading etcd v${etcd_version}..."
-wget_retry "https://github.com/etcd-io/etcd/releases/download/v${etcd_version}/$etcd_archive" || {
-  echo "ERROR: Failed to download etcd. Aborting." >&2
-  exit 1
-}
 
-tar -xvf $etcd_archive
+# Verify etcd archive was pre-deployed by deploybinaries.sh
+if [[ -f "$etcd_archive" ]]; then
+  echo "==> Found pre-deployed etcd archive: $(pwd)/$etcd_archive"
+else
+  echo "ERROR: etcd archive not found at $(pwd)/$etcd_archive" >&2
+  echo "  This file should have been deployed by deploybinaries.sh." >&2
+  echo "  Please ensure deploybinaries.sh ran successfully before this script." >&2
+  exit 1
+fi
+
+tar -xvf "$etcd_archive"
 
 # PREVENT "Text file busy": Remove existing binaries before copying for reentrancy
 rm -f /usr/local/bin/etcd /usr/local/bin/etcdctl /usr/local/bin/etcdutl
@@ -41,6 +46,7 @@ Documentation=https://github.com/coreos
 
 [Service]
 Type=notify
+TimeoutStartSec=180
 ExecStart=/usr/local/bin/etcd \\
   --name $vmname \\
   --cert-file=/etc/etcd/kubernetes.pem \\
@@ -70,18 +76,54 @@ systemctl daemon-reload
 systemctl enable etcd
 systemctl start etcd
 
+# Wait for all 3 etcd members to be healthy before proceeding.
+# systemctl start etcd (Type=notify) blocks until this node's etcd is ready,
+# which requires quorum (2/3). But we wait for ALL 3 members so that
+# kube-apiserver won't log connection errors for a lagging third member.
+echo "==> Waiting for etcd cluster to become fully healthy (3/3 members)..."
+etcd_tls="--cacert=/etc/etcd/ca.pem --cert=/etc/etcd/kubernetes.pem --key=/etc/etcd/kubernetes-key.pem"
+etcd_endpoints="--endpoints=https://192.168.42.11:2379,https://192.168.42.12:2379,https://192.168.42.13:2379"
+deadline=$((SECONDS + 120))
+while true; do
+  started_count=$(etcdctl $etcd_tls member list 2>/dev/null | grep -c ", started," || true)
+  if [[ "$started_count" -eq 3 ]]; then
+    echo "    etcd cluster is healthy (3/3 members started)."
+    break
+  fi
+  if [[ $SECONDS -ge $deadline ]]; then
+    echo "ERROR: etcd cluster did not reach 3/3 healthy members within 120s." >&2
+    echo "  Members found started: $started_count/3" >&2
+    etcdctl $etcd_tls $etcd_endpoints endpoint status --write-out=table 2>&1 >&2 || true
+    etcdctl $etcd_tls member list 2>&1 >&2 || true
+    exit 1
+  fi
+  echo "    etcd members started: $started_count/3, retrying in 3s..."
+  sleep 3
+done
+
 # --- Kubernetes Control Plane Section ---
 
 mkdir -p /etc/kubernetes/config
 
-echo "==> Downloading Kubernetes control plane binaries v${k8s_version}..."
-wget_retry \
-  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-apiserver" \
-  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-controller-manager" \
-  "https://dl.k8s.io/release/v${k8s_version}/bin/linux/${arch}/kube-scheduler" || {
-    echo "ERROR: Failed to download Kubernetes control plane binaries after retries. Aborting." >&2
-    exit 1
-  }
+# Verify K8s control plane binaries were pre-deployed by deploybinaries.sh
+k8s_binaries=(kube-apiserver kube-controller-manager kube-scheduler)
+missing_binaries=()
+for bin in "${k8s_binaries[@]}"; do
+  if [[ -f "$bin" ]]; then
+    echo "==> Found pre-deployed binary: $(pwd)/$bin"
+  else
+    missing_binaries+=("$bin")
+  fi
+done
+if [[ ${#missing_binaries[@]} -gt 0 ]]; then
+  echo "ERROR: The following K8s control plane binaries were not found in $(pwd)/:" >&2
+  for bin in "${missing_binaries[@]}"; do
+    echo "  - $bin" >&2
+  done
+  echo "  These files should have been deployed by deploybinaries.sh." >&2
+  echo "  Please ensure deploybinaries.sh ran successfully before this script." >&2
+  exit 1
+fi
 
 chmod +x kube-apiserver kube-controller-manager kube-scheduler
 
